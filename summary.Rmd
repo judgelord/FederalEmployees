@@ -1,0 +1,227 @@
+---
+title: "Federal Employees"
+output: 
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+source("setup.R")
+  load("FACTDATA_DEC2016.Rdata")
+  data <- d
+  
+  # names of things
+data %<>% 
+  left_join(read.csv("opm/DTagy.csv"), by = "AGYSUB") %>%
+  left_join(read.csv("opm/DTtoa.csv"), by = "TOA") %>%
+  left_join(read.csv("opm/DTedlvl.csv"), by = "EDLVL") %>%
+  left_join(read.csv("opm/DTocc.csv"), by = "OCC") %>%
+  left_join(read.csv("opm/DTloc.csv"), by = "LOC") 
+```
+ 
+
+# The Department of Transportation
+```{r}
+# subset to DOT
+data %<>% filter(AGY == "TD") # DOT only
+```
+
+```{r all-employees} 
+# all employees
+ggplot(data) + geom_bar(aes(x=AGYSUBT)) + coord_flip() + 
+  labs(x = "", y = "", title = "Total Employees")
+```
+
+---
+
+# GS levels
+
+FAA uses different system.
+```{r ses-gs, fig.height=5}
+# by GS level (note FAA has a GS grade even for these employees)
+ggplot(data) + 
+  geom_bar(aes(x=AGYSUBT, fill = GSEGRD)) +
+  coord_flip() + 
+  labs(x = "", y = "", title = "")
+```
+
+---
+
+#FAA
+
+```{r FAA}
+ggplot(data %>% filter(
+  LOC == "11",
+  AGYSUBT == "TD03-FEDERAL AVIATION ADMINISTRATION",
+  #TOAT == "48-Excepted Service - Other",
+  grepl("EX|FJ|EV", PPGRD)
+) ) + coord_flip() + 
+  geom_bar(aes(OCCT, fill = PPGRD)) + 
+  labs(x = "", y = "", title = "FAA \"Exempted Service\" non-Air Traffic Control Employees by pay grade")  +
+  theme(legend.position="bottom", legend.title = element_blank())
+
+data %<>% 
+  mutate(AGYSUBT = str_remove(AGYSUBT, "^TD...") ) %>% 
+  mutate(AGYSUBT = str_to_title(AGYSUBT))
+```
+
+We recode FAA employees: Appointees are those starting with an EX or FJ (Ex is executive, and FJ is non-career appointments).  EV 1-4 are different classes of SES employees.  The FVs are for most employees (closest to the GS scale).  FG is for employees with specialized skills such as air traffic controllers.
+```{r recode-FAA, echo=TRUE}
+# recode FAA appointees: appointees are those starting with an EX or FJ (Ex is executive, and FJ is non-career appointments).  EV 1-4 are different classes of SES employees.  The FVs are for most employees (closest to the GS scale).  FG is for employees with specialized skills such as air traffic controllers.
+data %<>% 
+  mutate(appointment = TOAT) %>% 
+  mutate(appointment = ifelse(
+    str_detect(PPGRD, "FJ"),
+    "44-Excepted Service - Schedule C",
+    appointment)) %>%
+  mutate(appointment = ifelse(
+    str_detect(PPGRD, "EV"),
+    "50-Senior Executive Service - Career",
+    appointment)) %>%
+  mutate(appointment = ifelse(
+    str_detect(PPGRD, "EX"),
+    "Administrator",
+    appointment)) 
+
+# Identify SES political appointees
+data %<>% 
+  mutate(
+    political = ifelse(appointment %in% c("44-Excepted Service - Schedule C", 
+                                   "55-Senior Executive Service - Non-Career", 
+                                   "60-Senior Executive Service - Limited Term",
+                                   "65-Senior Executive Service - Limited Emergency",
+                                   "Administrator"), 
+                       "Political", NA)) %>%
+  # Carreer SES:
+  mutate(political = ifelse(appointment %in% c("50-Senior Executive Service - Career"), 
+                       "Carreer", political))
+```
+
+
+---
+
+# Senior Executive Service Employees
+
+```{r ses-employees} 
+# SES employees 
+data %>% 
+  drop_na(political) %>% 
+ggplot() + 
+  geom_bar(aes(x=AGYSUBT, fill = appointment)) +
+  coord_flip() + 
+  labs(x = "", y = "", 
+       fill= "",
+       title = "SES Employees")
+```
+
+---
+# Pay grade: 
+
+```{r ses-by-pay}
+# by GS level (note FAA has lots of non-GS)
+ggplot(data %>% filter(grepl("GS|EX|FJ|EV", PPGRD))) + 
+  geom_bar(aes(x=AGYSUBT, fill = PPGRD)) +
+  coord_flip() + 
+  labs(x = "", y = "", 
+       fill = "Pay Grade",
+       title = "SES by Pay Grade")
+```
+
+
+---
+
+Some of these occupations are more likely to be involved in rule writing:
+```{r ses-occupations, fig.height=5.5}
+data %>% filter(#LOC == "11",
+                appointment == "50-Senior Executive Service - Career")%>% 
+ggplot()+
+  coord_flip() + 
+  geom_bar(aes(AGYSUBT, fill = OCCT)) + 
+  labs(x = "", y = "", 
+       fill = "Occupation",
+       title = "SES Employees")  + 
+  guides(fill = guide_legend(ncol = 1))
+
+```
+
+---
+
+
+# Political v. Career SES
+
+```{r political}
+
+ggplot(data %>% filter(!is.na(political), LOC == "11")) +
+  geom_bar(aes(x=AGYSUBT, fill = political)) +
+  coord_flip() + 
+  labs(x = "", y = "Number of Employees", 
+       title = "Senior-Level Employees in DC")  +
+  theme(legend.position="bottom", legend.title = element_blank())
+
+data$SALARY %<>% as.numeric()
+
+data %>% 
+  filter(!is.na(political), LOC == "11") %>% 
+  group_by(AGYSUBT, political) %>% 
+  summarise(budget = sum(SALARY)) %>% 
+ggplot() +
+  geom_col(aes(x=AGYSUBT, y = budget, fill = political)) +
+  coord_flip() + 
+  scale_y_continuous(labels = scales::dollar) +
+  labs(x = "", y = "", title = "Senior-Level Salaries in DC")  +
+  theme(legend.position="bottom", legend.title = element_blank())
+
+data %>% 
+  filter(AGYSUB %in% c("TD15", "TD16", "TD10","TD05", "TD17", "TD04", "TD03" )) %>% 
+  filter(!is.na(political), LOC == "11") %>% 
+  group_by(AGYSUBT, political) %>% 
+  summarise(budget = sum(SALARY)) %>%
+ggplot() +
+  geom_col(aes(x=AGYSUBT, y = budget, fill = political)) +
+  coord_flip() + 
+  scale_y_continuous(labels = scales::dollar) +
+  labs(x = "", y = "", title = "Senior-Level Salaries in DC of Agencies in Regulatory Budget")  +
+  theme(legend.position="bottom", legend.title = element_blank())
+```
+
+```{r}
+save(data, file = "data/FederalEmployees.Rdata")
+```
+
+# Regulatory Budget
+
+```{r reg-budget-data}
+b <- readxl::read_xlsx(here("data/RegulatorsBudget_RawData-2019.xlsx"))
+b %<>% select(Agency, '2016') %>% 
+  filter(Agency %in% c("Federal Aviation Administration (18)",
+                       "Federal Highway Administration (19)",
+                       "Federal Motor Carrier Safety Administration (20)",
+                       "Federal Railroad Administration",
+                       "National Highway Traffic Safety Administration",
+                       "Pipeline and Hazardous Materials Safety Administration (21)",
+                       "Surface Transportation Board (22)") )
+
+b %<>% rename(Budget = `2016`)%>% 
+  mutate(Agency = str_remove(Agency, " .[0-9][0-9]."))
+
+b$Budget %<>% as.numeric()
+
+b %<>% mutate(Budget = Budget*1000000)
+```
+
+```{r reg-budget}
+b %>% 
+ggplot() +
+  geom_col(aes(x=Agency, y = Budget)) +
+  coord_flip() + 
+  scale_y_continuous(labels = scales::dollar) +
+  labs(x = "", y = "", title = "Regultory budget")  +
+  theme(legend.position="bottom", legend.title = element_blank())
+```
+
+
+```{r}
+RegBudget <- b
+save(RegBudget, file = "data/RegBudget.Rdata")
+```
